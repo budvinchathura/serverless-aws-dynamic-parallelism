@@ -29,6 +29,9 @@ functions:
 
   processTask:
     handler: handlers.processTask
+
+  summaryTask:
+    handler: handlers.summaryTask
     
 
 stepFunctions:
@@ -51,6 +54,8 @@ stepFunctions:
             InputPath: "$.body"
             ItemsPath: "$.taskList"
             MaxConcurrency: 5
+            ResultPath: "$.results"
+            Next: SummaryTaskStep
             Iterator:
               StartAt: ProcessTaskStep
               States:
@@ -65,8 +70,14 @@ stepFunctions:
                   Type: Pass
                   Result: "Error when processing a task"
                   End: true
+          SummaryTaskStep:
+            Type: Task
+            Resource: !GetAtt summaryTask.Arn
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: StateMachineErrorFallback
             End: true
           StateMachineErrorFallback:
             Type: Pass
-            Result: "Error in find tasks step"
+            Result: "Error in state machine"
             End: true
