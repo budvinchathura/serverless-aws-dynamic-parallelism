@@ -1,0 +1,72 @@
+service: serverless-aws-dynamic-parallelism
+
+frameworkVersion: "2.28.7"
+
+
+plugins:
+  - serverless-step-functions
+
+package:
+  exclude:
+    - node_modules/aws-sdk/**
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: dev
+  region: us-east-1
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "s3:PutObject"
+      Resource: arn:aws:s3:::processed-tasks-bucket/*
+  environment:
+    bucketName: processed-tasks-bucket
+
+functions:
+  findTasks:
+    handler: handlers.findTasks
+
+  processTask:
+    handler: handlers.processTask
+    
+
+stepFunctions:
+  stateMachines:
+    taskStateMachine:
+      name: task-processing-statemachine-${self:provider.stage}
+      definition:
+        Comment: 'Step function executing tasks parallelly'
+        StartAt: FindTasksStep
+        States:
+          FindTasksStep:
+            Type: Task
+            Resource: !GetAtt findTasks.Arn
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: StateMachineErrorFallback
+            Next: ProcessTasksMappedTask
+          ProcessTasksMappedTask:
+            Type: Map
+            InputPath: "$.body"
+            ItemsPath: "$.taskList"
+            MaxConcurrency: 5
+            Iterator:
+              StartAt: ProcessTaskStep
+              States:
+                ProcessTaskStep:
+                  Type: Task
+                  Resource: !GetAtt processTask.Arn
+                  Catch:
+                    - ErrorEquals: ["States.ALL"]
+                      Next: ProcessTaskErrorFallback
+                  End: true
+                ProcessTaskErrorFallback:
+                  Type: Pass
+                  Result: "Error when processing a task"
+                  End: true
+            End: true
+          StateMachineErrorFallback:
+            Type: Pass
+            Result: "Error in find tasks step"
+            End: true
